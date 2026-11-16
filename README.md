@@ -1,6 +1,6 @@
 # gentooinstall + toe
 
-> **This is a fork** of [w0x7y/gentooinstall](https://github.com/w0x7y/gentooinstall). It installs exactly the same system, with one more option: **toe**, a friendlier front-end to `emerge` (`toe install fastfetch`, `toe remove fastfetch`, `toe update`). It is on by default; turn it off under **Packages → toe**, or with `toe=no` in a config file.
+> **This is a fork** of [w0x7y/gentooinstall](https://github.com/w0x7y/gentooinstall). It installs exactly the same system, with one more option: **toe**, a friendlier front-end to `emerge` (`toe install fastfetch`, `toe remove fastfetch`, `toe update`). It is on by default; turn it off under **Packages → toe**, or with `toe=no` in a config file. toe itself lives at [lamex30/toe](https://github.com/lamex30/toe); on an installed system `sudo toe self-update` brings it up to date.
 
 > **Note:** an unofficial project, not part of Gentoo, written with an AI coding assistant. [How it was made](HOW-IT-WAS-MADE.md)
 

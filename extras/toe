@@ -20,7 +20,7 @@ import subprocess
 import sys
 import time
 
-VERSION = "0.1.0"
+VERSION = "0.2.0"
 
 # ───────────────────────────── paths & config ──────────────────────────────
 
@@ -51,6 +51,7 @@ DEFAULT_CONF = {
     "fancy": True,               # unicode/box drawing; False = plain ASCII
     "lang": "auto",              # auto | en | ru
     "symbols": "auto",           # auto | unicode | console (Linux TTY) | ascii
+    "update_url": "https://raw.githubusercontent.com/lamex30/toe/main/toe",
 }
 
 
@@ -1241,6 +1242,11 @@ def parse_pretend(out):
     return plan
 
 
+def prebuilt(it):
+    """A plan item that compiles nothing: from the binhost, or a -bin ebuild (upstream's binary)."""
+    return it["kind"] == "binary" or it["cp"].endswith("-bin")
+
+
 def plan_rows(plan, idx):
     rows = []
     for it in plan.items:
@@ -1257,7 +1263,7 @@ def plan_rows(plan, idx):
             st = ui.badge("del")
         else:
             st = ui.badge("re")
-        src = ui.badge("bin") if it["kind"] == "binary" else ui.badge("src")
+        src = ui.badge("bin") if prebuilt(it) else ui.badge("src")
         cat, pn = it["cp"].split("/", 1) if "/" in it["cp"] else ("", it["cp"])
         ver = cpv_version(it["cpv"])
         old = (cpv_version(it["old"]) or it["old"]) if it["old"] else ""
@@ -1672,13 +1678,12 @@ def cmd_install(a, argv):
         if not m:
             continue
         cp = m.cp
-        # X vs X-bin
-        if CONF["prefer_binary"] and cp not in idx.binary and not res.suffix:
-            alt = cp + "-bin"
-            if alt in idx.by_cp and alt not in idx.installed:
-                ui.out(T(f"   {ui.yellow('?')} {cp} придётся собирать, но есть готовый {ui.bold(alt)}", f"   {ui.yellow('?')} {cp} must be compiled, but prebuilt {ui.bold(alt)} exists"))
-                if ui.ask(T(f"Взять {alt}?", f"Use {alt}?"), True):
-                    cp = alt
+        # X vs X-bin: whenever a prebuilt -bin variant exists, say which one compiles and ask
+        if not res.suffix:
+            cp = choose_bin_variant(cp, idx, a)
+            if cp is None:
+                ui.step(T("пропускаю", "skipping"))
+                continue
         if cp in idx.installed and not a.reinstall and not res.suffix:
             ui.ok(T(f"{pkg_line(idx.by_cp[cp], idx, False)} уже установлен", f"{pkg_line(idx.by_cp[cp], idx, False)} is already installed"))
             if cp not in idx.world:
@@ -1753,7 +1758,7 @@ def cmd_install(a, argv):
         for b in plan.blockers:
             ui.out("     " + ui.red(b))
 
-    show_plan(plan, idx)
+    show_plan(plan, idx, picked)
     if a.dry_run or a.explain:
         ui.out(ui.dim("   $ emerge " + " ".join(flags + atoms)))
         return 0
@@ -1777,6 +1782,79 @@ def cmd_install(a, argv):
         ui.final = ui.c("1;32", T(f"установлено пакетов: {len(plan.items)}", f"{len(plan.items)} packages installed"))
         after_ops()
     return rc
+
+
+HEAVY = {"firefox", "chromium", "thunderbird", "libreoffice", "llvm", "clang", "rust", "qtwebengine",
+         "webkit-gtk", "gcc", "spidermonkey", "nodejs", "openjdk", "ghc", "electron", "blender", "kicad"}
+
+
+def bin_variants(cp, idx):
+    """Prebuilt '-bin' packages for CP (same category first), e.g. www-client/firefox-bin."""
+    cat, pn = cp.split("/", 1)
+    if pn.endswith("-bin"):
+        return []
+    found = [e["cp"] for e in idx.by_pn.get(pn + "-bin", [])]
+    return sorted(found, key=lambda c: (c.split("/")[0] != cat, c))
+
+
+def will_compile(cp):
+    """True when emerge would build CP from source, False when it comes from the binhost,
+    None when that can't be told (masked, blockers, ...)."""
+    rc, out = run(["emerge", "--pretend", "--nodeps", "--color=n", "--getbinpkg", "--binpkg-respect-use=y",
+                   "--autounmask=y", "--autounmask-write=n", "--autounmask-license=y", cp], capture=True)
+    for it in parse_pretend(out).items:
+        if it["cp"] == cp:
+            return it["kind"] == "ebuild"
+    return None
+
+
+def build_hint(cp):
+    t = build_time_hint([cp]).get(cp)
+    if t:
+        return T(f"раньше собирался {t}", f"took {t} last time")
+    if cp.split("/")[-1] in HEAVY:
+        return T("это может занять полчаса и больше", "this can take half an hour or more")
+    return ""
+
+
+def choose_bin_variant(cp, idx, a):
+    """Ask between CP and its prebuilt -bin variant; returns the chosen cp."""
+    alts = bin_variants(cp, idx)
+    if not alts:
+        return cp
+    alt = alts[0]
+    if alt in idx.installed or cp in idx.installed:
+        return alt if alt in idx.installed else cp
+    if a.bin:
+        return alt
+    if a.source:
+        return cp
+    ui.step(T(f"у {cp} есть готовая версия {ui.bold(alt)}, проверяю, соберётся ли обычная…",
+              f"{cp} has a prebuilt {ui.bold(alt)}; checking whether the regular one compiles…"))
+    comp = will_compile(cp)
+    bin_txt = T("готовый бинарник от разработчиков, без компиляции, ставится за пару минут",
+                "the upstream prebuilt binary: no compiling, installs in a couple of minutes")
+    if comp is False:
+        reg_txt = T("тоже готовый: скачается с бинхоста Gentoo, с твоими USE-флагами",
+                    "also prebuilt: downloads from the Gentoo binhost, with your USE flags")
+        first = cp
+    else:
+        hint = build_hint(cp)
+        reg_txt = (T("СОБИРАЕТСЯ ИЗ ИСХОДНИКОВ", "COMPILES FROM SOURCE") + (f" ({hint})" if hint else "")
+                   if comp else T("не удалось проверить, возможно соберётся из исходников",
+                                  "couldn't check; it may compile from source"))
+        first = alt
+    options = [(alt, bin_txt), (cp, reg_txt)]
+    if first == cp:
+        options.reverse()
+    if ui.yes:
+        choice = options[0][0]
+        ui.step(T(f"беру {choice}", f"taking {choice}"))
+        return choice
+    items = [f"{ui.bold(c)}  {ui.dim(t) if c == alt else (ui.yellow(t) if comp else ui.green(t))}" for c, t in options]
+    details = [idx.by_cp[c]["desc"] if c in idx.by_cp else "" for c, _ in options]
+    i = ui.pick(T("Какую версию поставить?", "Which version to install?"), items, details)
+    return None if i is None else options[i][0]
 
 
 def handle_ignored_bin(plan, a, tag):
@@ -1807,12 +1885,12 @@ def show_changes(need):
                 ui.out("    " + ui.cyan(l))
 
 
-def show_plan(plan, idx):
+def show_plan(plan, idx, picked=()):
     rows = plan_rows(plan, idx)
     if not rows:
         return
-    nb = sum(1 for i in plan.items if i["kind"] == "binary")
-    ns = sum(1 for i in plan.items if i["kind"] == "ebuild")
+    nb = sum(1 for i in plan.items if prebuilt(i))
+    ns = sum(1 for i in plan.items if i["kind"] == "ebuild" and not prebuilt(i))
     d = ui.dim(ui.sym["dot"])
     head = T(f"{len(rows)} пак.", f"{len(rows)} packages")
     head += f"  {d}  " + ui.green(T(f"{nb} бинарных", f"{nb} binary"))
@@ -1820,8 +1898,13 @@ def show_plan(plan, idx):
         head += f"  {d}  " + ui.yellow(T(f"{ns} из исходников", f"{ns} from source"))
     ui.head(head)
     ui.table(rows, indent="  ")
+    for it in plan.items:
+        if it["kind"] == "ebuild" and it["cp"] in picked and not it["cp"].endswith("-bin"):
+            hint = build_hint(it["cp"])
+            ui.warn(T(f"{ui.bold(it['cp'])} будет собираться из исходников", f"{ui.bold(it['cp'])} will compile from source") +
+                    (ui.dim(f" ({hint})") if hint else ""))
     if ns:
-        times = build_time_hint([i["cp"] for i in plan.items if i["kind"] == "ebuild"])
+        times = build_time_hint([i["cp"] for i in plan.items if i["kind"] == "ebuild" and not prebuilt(i)])
         if times:
             ui.out("  " + ui.dim(T("раньше собирались: ", "previous builds: ") +
                                 ", ".join(f"{k.split('/')[-1]} {v}" for k, v in list(times.items())[:3])))
@@ -2273,6 +2356,48 @@ def cmd_reindex(a, argv):
     return 0 if idx.entries else 1
 
 
+def cmd_self_update(a, argv):
+    """Download the latest toe from its GitHub repo, check it, and replace this file."""
+    ensure_root(argv)
+    banner("self-update")
+    import urllib.request
+    me = os.path.realpath(sys.argv[0])
+    url = CONF["update_url"]
+    ui.head(T("Скачиваю свежий toe", "Downloading the latest toe"))
+    ui.step(ui.dim(url))
+    try:
+        with urllib.request.urlopen(url, timeout=30) as r:
+            text = r.read().decode("utf-8")
+    except Exception as e:
+        ui.err(T(f"не получилось скачать: {e}", f"download failed: {e}"))
+        return 1
+    m = re.search(r'^VERSION = "([^"]+)"', text, re.M)
+    if not text.startswith("#!/usr/bin/env python3") or not m:
+        ui.err(T("скачалось что-то не то — это не toe", "that download isn't toe"))
+        return 1
+    try:
+        compile(text, "toe", "exec")
+    except SyntaxError as e:
+        ui.err(T(f"в скачанном файле ошибка, не ставлю: {e}", f"the download is broken, not installing it: {e}"))
+        return 1
+    try:
+        with open(me) as f:
+            same = f.read() == text
+    except OSError:
+        same = False
+    if same:
+        ui.final = ui.c("1;32", T(f"toe {VERSION} уже самый свежий", f"toe {VERSION} is already the latest"))
+        return 0
+    tmp = me + ".new"
+    with open(tmp, "w") as f:
+        f.write(text)
+    os.chmod(tmp, 0o755)
+    os.replace(tmp, me)
+    log(f"self-update {VERSION} -> {m.group(1)}")
+    ui.final = ui.c("1;32", f"toe {VERSION} {ui.sym['arrow']} {m.group(1)}")
+    return 0
+
+
 def cmd_setup(a, argv):
     ensure_root(argv)
     banner("setup")
@@ -2302,7 +2427,7 @@ def write_completions(me):
 _toe() {
   local cur=${COMP_WORDS[COMP_CWORD]} cmd=${COMP_WORDS[1]}
   if [ $COMP_CWORD -eq 1 ]; then
-    COMPREPLY=($(compgen -W "install remove search info update clean list why files owns history fix doctor undo alias reindex setup" -- "$cur")); return
+    COMPREPLY=($(compgen -W "install remove search info update clean list why files owns history fix doctor undo alias reindex setup self-update" -- "$cur")); return
   fi
   case $cmd in
     install|search|info) COMPREPLY=($(compgen -W "$(toe _names 2>/dev/null)" -- "$cur")) ;;
@@ -2319,7 +2444,7 @@ complete -F _toe toe
     fishd = "/usr/share/fish/vendor_completions.d"
     if os.path.isdir(fishd):
         with open(os.path.join(fishd, "toe.fish"), "w") as f:
-            f.write("complete -c toe -f -n '__fish_use_subcommand' -a 'install remove search info update clean list why files owns history fix doctor undo alias reindex setup'\n"
+            f.write("complete -c toe -f -n '__fish_use_subcommand' -a 'install remove search info update clean list why files owns history fix doctor undo alias reindex setup self-update'\n"
                     "complete -c toe -f -n '__fish_seen_subcommand_from install search info' -a '(toe _names)'\n"
                     "complete -c toe -f -n '__fish_seen_subcommand_from remove why files' -a '(toe _names --installed)'\n")
         ui.ok(T("автодополнение fish", "fish completion"))
@@ -2422,6 +2547,7 @@ def build_parser():
     ri = sp.add_parser("reindex", help=T("пересобрать индекс поиска", "rebuild search index"))
     ri.set_defaults(fn=cmd_reindex)
     sp.add_parser("setup", help=T("поставить хук, конфиг, автодополнение", "install hook, config, completions")).set_defaults(fn=cmd_setup)
+    sp.add_parser("self-update", aliases=["selfupdate"], help=T("обновить сам toe с GitHub", "update toe itself from GitHub")).set_defaults(fn=cmd_self_update)
     nm = sp.add_parser("_names")
     nm.add_argument("--installed", action="store_true")
     nm.set_defaults(fn=cmd_names)
