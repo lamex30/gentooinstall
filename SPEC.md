@@ -205,7 +205,7 @@ Every question has a help line, can be answered from a config file, and validate
   - [ ] `[gentoo-x86-64-v3]` → `.../23.0/x86-64-v3/` with a higher priority, only when the CPU supports v3. Keep both repos, as the Handbook does.
   - [ ] Swap the host for the chosen mirror.
 - [ ] Run `getuto` to set up the binary package keyring.
-- [ ] Write `package.use` files for the answers: installkernel flags, systemd-boot flags, `net-wireless/wpa_supplicant dbus` for NetworkManager on non-desktop profiles, PipeWire flags.
+- [ ] Write `package.use` files for the answers: installkernel flags, systemd-boot flags, `net-wireless/wpa_supplicant tkip` always, plus `dbus` for NetworkManager on non-desktop profiles, PipeWire flags.
 - [ ] Use `package.accept_keywords` only when a chosen option needs a testing package, and show which ones. Prefer stable.
 
 ## 9. Compile preview
@@ -292,6 +292,7 @@ Every question has a help line, can be answered from a config file, and validate
 - [ ] systemd-networkd option: a `.network` file matching `en*` with DHCP, `systemctl enable systemd-networkd`, and systemd-resolved with `/etc/resolv.conf` linked to its stub.
 - [ ] Enable exactly one network manager. Disable any other that a profile or package enabled.
 - [ ] Install `net-wireless/iw` and `net-wireless/wpa_supplicant` for Wi-Fi debugging.
+- [ ] Build `net-wireless/wpa_supplicant` with `tkip`. Gentoo leaves it off, but ISP routers in mixed WPA/WPA2 mode use TKIP as the group cipher, and without it wpa_supplicant rejects the network ("mismatch with WPA/WPA2"), so NetworkManager never lists it, though the live ISO joins it.
 - [ ] (later) iwd as the NetworkManager backend.
 - [ ] (later) Static IP.
 
