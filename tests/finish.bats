@@ -146,6 +146,16 @@ x11-drivers/nvidia-drivers-595.104.02 source" ]
   grep -qxF '  $ fprintd-enroll' "$GI_TARGET/home/larry/first-steps.txt"
 }
 
+@test "first-steps.txt shows toe when it was installed, and nothing about it otherwise" {
+  CFG[users]=larry CFG[desktop]=none CFG[toe]=yes
+  _finish_first_steps
+  grep -qxF '  # toe install fastfetch' "$GI_TARGET/home/larry/first-steps.txt"
+  grep -qxF '  # toe update' "$GI_TARGET/home/larry/first-steps.txt"
+  CFG[toe]=no
+  _finish_first_steps
+  run ! grep -q toe "$GI_TARGET/home/larry/first-steps.txt"
+}
+
 @test "Secure Boot: the summary says how to enroll the key with its code, and first-steps how to ask again" {
   CFG[users]=larry CFG[secure_boot]=yes CFG[keymap]=us
   state_set secureboot.mok_code 12345678

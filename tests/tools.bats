@@ -276,3 +276,57 @@ EOF
   [[ $stderr == *"cron.weekly/fstrim (mode 0755)"* ]]
   [[ $stderr == *"sshd_config.d/00-no-root-login.conf"* ]]
 }
+
+@test "toe: on, it is copied in, its setup runs in the chroot, and portage-utils comes with it" {
+  CFG[toe]=yes
+  run step_tools_packages
+  [[ $output == *$'\napp-portage/portage-utils' ]]
+  step step_tools
+  [ -x "$GI_TARGET/usr/local/bin/toe" ]
+  cmp -- "$GI_HOME/extras/toe" "$GI_TARGET/usr/local/bin/toe"
+  chroot_cmds | grep -qxF '/usr/local/bin/toe --yes setup'
+}
+
+@test "toe: a failed setup only warns, since toe builds its index on first use" {
+  CFG[toe]=yes
+  export STUB_RC_arch_chroot=1
+  run step _tools_toe
+  [ "$status" -eq 0 ]
+  [[ $output == *"toe setup failed"* ]]
+  [ -x "$GI_TARGET/usr/local/bin/toe" ]
+}
+
+@test "toe: off, nothing is installed, and a rerun after turning it off removes what an earlier run left" {
+  CFG[toe]=no
+  run step_tools_packages
+  [[ $output != *portage-utils* ]]
+  step step_tools
+  [ ! -e "$GI_TARGET/usr/local/bin/toe" ]
+  run ! grep -q toe "$GI_RUN_DIR/replay.sh"
+  CFG[toe]=yes
+  step step_tools
+  mkdir -p "$GI_TARGET/etc/portage/postsync.d" "$GI_TARGET/usr/share/bash-completion/completions"
+  touch "$GI_TARGET/etc/portage/postsync.d/60-toe" "$GI_TARGET/usr/share/bash-completion/completions/toe"
+  CFG[toe]=no
+  step step_tools
+  [ ! -e "$GI_TARGET/usr/local/bin/toe" ]
+  [ ! -e "$GI_TARGET/etc/portage/postsync.d/60-toe" ]
+  [ ! -e "$GI_TARGET/usr/share/bash-completion/completions/toe" ]
+}
+
+@test "toe: dry-run prints the copy and the setup and changes nothing" {
+  CFG[toe]=yes GI_DRY_RUN=1
+  run step _tools_toe
+  [ "$status" -eq 0 ]
+  [[ $output == *"install -D -m 0755"*"/usr/local/bin/toe"* ]]
+  [[ $output == *"/usr/local/bin/toe --yes setup"* ]]
+  [ ! -e "$GI_TARGET/usr/local/bin/toe" ]
+}
+
+@test "toe: the shipped file is a Python program that compiles" {
+  head -1 "$GI_HOME/extras/toe" | grep -qxF '#!/usr/bin/env python3'
+  [ -x "$GI_HOME/extras/toe" ]
+  if command -v python3 > /dev/null; then
+    python3 -c 'import ast, sys; ast.parse(open(sys.argv[1]).read())' "$GI_HOME/extras/toe"
+  fi
+}

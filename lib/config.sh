@@ -4,7 +4,7 @@
 GI_CFG_KEYS=(format keymap disk disk_mode filesystem home root_size encryption luks_discard swap init desktop
   gnome_variant display_manager bootloader secure_boot kernel kernel_version nvidia_driver network keep_wifi wifi_ssid
   audio bluetooth power thermald fwupd printing fingerprint sshd flatpak hostname timezone locales lang root users
-  privilege mirror binpkgs cflags makeopts emerge_jobs tune browser fonts_cjk media_keys packages explain)
+  privilege mirror binpkgs cflags makeopts emerge_jobs tune browser fonts_cjk media_keys packages toe explain)
 declare -gA GI_CFG_LOCKED=()
 
 # Accounts and groups the stage3 or the packages we install already have.
@@ -86,7 +86,7 @@ _cfg_check() { # KEY VALUE; prints the problem and returns 1
     root) _cfg_enum "$v" password locked ;;
     privilege) _cfg_enum "$v" sudo doas ;;
     browser) _cfg_enum "$v" firefox-bin chromium none ;;
-    luks_discard | keep_wifi | bluetooth | thermald | fwupd | sshd | binpkgs | tune | fonts_cjk | media_keys | explain | secure_boot | flatpak | printing | fingerprint)
+    luks_discard | keep_wifi | bluetooth | thermald | fwupd | sshd | binpkgs | tune | fonts_cjk | media_keys | explain | secure_boot | flatpak | printing | fingerprint | toe)
       _cfg_enum "$v" yes no
       ;;
     wifi_ssid)
@@ -222,6 +222,8 @@ cfg_defaults_apply() { # [ask]
   _cfg_default cflags '-march=native -O2 -pipe'
   _cfg_default makeopts auto
   _cfg_default emerge_jobs auto
+  # toe is what this fork adds; it stays on unless turned off.
+  _cfg_default toe yes
   read -ra users <<< "${CFG[users]}"
   for u in "${users[@]}"; do
     _cfg_default "user.$u.admin" yes

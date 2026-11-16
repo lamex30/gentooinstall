@@ -553,3 +553,12 @@ ok_config() {
   CFG[network]=networkd
   [ -z "$(cfg_secrets_missing network)" ]
 }
+
+@test "toe: on by default, takes yes or no, and an old config without the key gets the default" {
+  cfg_defaults_apply
+  [ "${CFG[toe]}" = yes ]
+  run cfg_validate toe maybe
+  [ "$status" -eq 1 ]
+  cfg_set toe no
+  [ "${CFG[toe]}" = no ]
+}

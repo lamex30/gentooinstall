@@ -93,6 +93,9 @@ _finish_first_steps() {
         printf 'The systems that were on the disk before are still there. Any not in the\nboot menu start from the firmware boot menu: press a key like F12, F11 or\nEsc while the computer starts.\n\n'
       fi
       printf 'Lines starting with # need root: type %s in front of them if your\naccount is an admin, or log in as root.\n\n' "${CFG[privilege]}"
+      if [[ ${CFG[toe]:-} == yes ]]; then
+        printf 'toe installs and removes packages by name, on top of emerge:\n  # toe install fastfetch\n  # toe remove fastfetch\n  $ toe search "pdf viewer"\n  # toe update\nIt finds a package by a loose name, shows what downloads prebuilt and what\ncompiles, and asks before it changes /etc/portage; toe undo reverts that.\n\n'
+      fi
       _finish_savedconfig_hint
       _finish_hyprland_hint
       _finish_limine_hint

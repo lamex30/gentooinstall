@@ -937,3 +937,15 @@ EOF
   [ ! -e "$GI_RUN_DIR/fzf/fzf" ]
   grep -q "couldn't download fzf $GI_FZF_VERSION with checksum $GI_FZF_SHA256" "$GI_LOG"
 }
+
+@test "toe: on by default in the Packages section, its row turns it off, and the hub's summary names it" {
+  q_run 'cfg_defaults_apply ask; CFG[keymap]=us; questions_run' 8 3 2 b b y
+  [ "$status" -eq 130 ]
+  [[ $stderr =~ toe\ +yes ]]
+  [[ $stderr == *"toe installs and removes packages by name"* ]]
+  [[ $stderr =~ toe\ +no ]]
+  source "$STATE"
+  [ "${CFG[toe]}" = no ]
+  q_run 'cfg_defaults_apply ask; CFG[keymap]=us; cfg_set binpkgs yes; cfg_set tune no; questions_run' b y
+  [[ $stderr =~ Packages\ +binary\ packages,\ toe ]]
+}

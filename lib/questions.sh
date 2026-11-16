@@ -128,7 +128,7 @@ _q_section_help() {
     Network) echo "Network: network manager, Wi-Fi, hostname, SSH" ;;
     Locale) echo "Locale: timezone, languages, keyboard" ;;
     Users) echo "Users: accounts, passwords, root, sudo or doas" ;;
-    Packages) echo "Packages: binary packages, extra packages, compiler settings, mirror" ;;
+    Packages) echo "Packages: binary packages, extra packages, toe, compiler settings, mirror" ;;
     Options) echo "Options: explain mode, firmware updates, thermald" ;;
   esac
 }
@@ -171,7 +171,7 @@ _q_summary() { # SECTION: one line for the hub
       read -ra pkgs <<< "${CFG[packages]}"
       if ((${#pkgs[@]})); then extra="${#pkgs[@]} extra"; fi
       _q_join "$(if [[ ${CFG[binpkgs]} == yes ]]; then echo binary packages; else echo source only; fi)" \
-        "$(_q_on tune tuned)" "$extra"
+        "$(_q_on tune tuned)" "$extra" "$(_q_on toe toe)"
       ;;
     Options) _q_join "explain mode $(if [[ ${CFG[explain]} == yes ]]; then echo on; else echo off; fi)" \
       "$(_q_on fwupd fwupd)" "$(_q_on thermald thermald)" "$(_q_on printing printing)" "$(_q_on fingerprint fingerprint)" ;;
@@ -305,6 +305,7 @@ _q_keys() { # SECTION: prints KEY<TAB>LABEL<TAB>HELP for each setting it shows
     Packages)
       _q_row binpkgs "Binary packages" "Download prebuilt packages instead of compiling"
       _q_row packages "Extra packages" "More packages to install, picked from Gentoo's list"
+      _q_row toe toe "A friendlier front-end to emerge: toe install firefox"
       _q_row tune "Tune for this machine" "CPU and GPU settings for this machine only"
       _q_row cflags "Compiler flags" "COMMON_FLAGS for packages built here"
       _q_row makeopts MAKEOPTS "How many compiler jobs run at once"
@@ -746,6 +747,11 @@ _q_edit() { # KEY: opens the editor for one setting; returns 1 on back
         no "Build everything from source." "A desktop then takes many hours."
       ;;
     packages) _q_packages ;;
+    toe)
+      _q_radio toe "toe" "toe installs and removes packages by name on top of emerge: toe install fastfetch, toe remove fastfetch, toe update. It finds packages by loose names, shows what downloads prebuilt and what compiles, and asks before it changes /etc/portage." yes \
+        yes "Install toe." "A single Python file, nothing to compile; app-portage/portage-utils comes with it." \
+        no "Leave toe out." "Use emerge directly."
+      ;;
     tune)
       _q_radio tune "Tune for this machine" "" no \
         no "Keep the generic settings." "They match the binary packages, so almost nothing compiles." \

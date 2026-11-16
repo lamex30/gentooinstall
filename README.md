@@ -1,4 +1,6 @@
-# gentooinstall
+# gentooinstall + toe
+
+> **This is a fork** of [w0x7y/gentooinstall](https://github.com/w0x7y/gentooinstall). It installs exactly the same system, with one more option: **toe**, a friendlier front-end to `emerge` (`toe install fastfetch`, `toe remove fastfetch`, `toe update`). It is on by default; turn it off under **Packages → toe**, or with `toe=no` in a config file.
 
 > **Note:** an unofficial project, not part of Gentoo, written with an AI coding assistant. [How it was made](HOW-IT-WAS-MADE.md)
 
@@ -23,7 +25,7 @@ Status: early. Tested in virtual machines and on one laptop.
 3. Download and start the installer:
 
    ```sh
-   git clone https://github.com/w0x7y/gentooinstall
+   git clone https://github.com/lamex30/gentooinstall
    cd gentooinstall
    ./gentooinstall
    ```
@@ -47,6 +49,7 @@ Status: early. Tested in virtual machines and on one laptop.
 - Printing, fingerprint login, and the newest kernel for very new hardware
 - On laptops with Intel or AMD graphics plus an NVIDIA GPU: `prime-run` to use the NVIDIA GPU for chosen apps, which powers off otherwise
 - Extra packages, picked from a searchable list
+- toe, which installs and removes packages by name: it finds `mangowm` from `mangowindowmanager`, shows what downloads prebuilt and what compiles, and asks before it changes `/etc/portage` (`toe undo` reverts that)
 
 Budgie, Hyprland, niri and MangoWM come from community overlays that Gentoo doesn't review, and they build from source.
 

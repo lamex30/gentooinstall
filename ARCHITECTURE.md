@@ -20,6 +20,7 @@ Each file has one owner part. A part edits only its own files. If it needs somet
 | `lib/steps/portage.sh`, `lib/steps/preview.sh`, `lib/steps/world.sh` | E portage | 8, 9, 10 |
 | `lib/steps/locale.sh`, `lib/steps/kernel.sh`, `lib/steps/system.sh`, `lib/steps/bootloader.sh` | F boot | 11, 12, 13, 16 |
 | `lib/steps/network.sh`, `lib/steps/tools.sh`, `lib/steps/users.sh` | G system | 14, 15, 17 |
+| `extras/toe` | G system (copied in by `lib/steps/tools.sh`) | toe |
 | `lib/steps/desktop.sh`, `lib/steps/graphics.sh`, `lib/steps/hardware.sh`, `lib/steps/finish.sh` | H desktop | 18, 19, 20, 21, 22 |
 
 Tests for a file live in `tests/<name>.bats` (for example `tests/disk.bats`, and `tests/entry.bats` for the entry point) and belong to the same part. Extra stubs a part needs are new symlinks in `tests/stubs/`, owned by that part.
@@ -184,6 +185,7 @@ File format and rules are in `SPEC.md` under "Config file". Keys, values and def
 | `fonts_cjk` | `yes` `no` | `no` |
 | `media_keys` | `yes` `no` | `no` |
 | `packages` | space-separated package atoms, picked in fzf | empty |
+| `toe` | `yes` `no` | `yes`. This fork's addition: installs `extras/toe` as `/usr/local/bin/toe` in the tools step |
 | `explain` | `yes` `no` | `no` |
 
 Secrets, kept in `SECRET`: `luks_passphrase` (with `luks2`), `root_password` (with `root=password`), `user.<name>.password` (each user), `wifi_psk` (with `network=networkmanager`, `keep_wifi=yes` and a `wifi_ssid`, since only NetworkManager gets the saved network; an empty value means an open network). A secret counts as given once its key exists in `SECRET`.

@@ -1,8 +1,8 @@
 # shellcheck shell=bash
-# System tools step: logger, cron, time sync, filesystem tools, TRIM, zram, btrfs snapshots and sshd.
+# System tools step: logger, cron, time sync, filesystem tools, TRIM, zram, btrfs snapshots, sshd and toe.
 
 step_define tools "System tools" \
-  "A system logger, cron and time sync keep the system running well. SSDs get a weekly TRIM, zram gives compressed swap in RAM, and sshd allows remote logins when chosen." \
+  "A system logger, cron and time sync keep the system running well. SSDs get a weekly TRIM, zram gives compressed swap in RAM, sshd allows remote logins when chosen, and toe gives emerge a friendlier front-end." \
   "https://wiki.gentoo.org/wiki/Handbook:AMD64/Installation/Tools"
 
 step_tools_portage() {
@@ -31,6 +31,8 @@ step_tools_packages() {
     if is_openrc; then p+=(sys-block/zram-init); else p+=(sys-apps/zram-generator); fi
   fi
   if [[ ${CFG[sshd]} == yes ]]; then p+=(net-misc/openssh); fi
+  # toe reads build times and file owners with qlop and qfile.
+  if [[ ${CFG[toe]:-} == yes ]]; then p+=(app-portage/portage-utils); fi
   printf '%s\n' "${p[@]}"
 }
 
@@ -69,6 +71,29 @@ step_tools() {
     _tools_no_root_login
   fi
   if [[ ${CFG[filesystem]} == btrfs ]]; then _tools_snapshots; fi
+  _tools_toe
+}
+
+# toe ships next to the installer as one Python file, so the new system downloads nothing for it.
+# Its setup writes the post-sync hook that keeps its search index fresh, its config and the shell
+# completions, and builds the index once. This step runs after the snapshot hook, so toe finds
+# /usr/local/sbin/snapshot on btrfs.
+_tools_toe() {
+  local f
+  if [[ ${CFG[toe]:-} == yes ]]; then
+    run_cmd install -D -m 0755 -- "$GI_HOME/extras/toe" "$GI_TARGET/usr/local/bin/toe"
+    # toe works without its setup too (it builds the index on first use), so a failure here is no
+    # reason to stop the install.
+    if ! run_chroot /usr/local/bin/toe --yes setup; then
+      warn "toe setup failed; toe still works, and sudo toe setup can be run again after the first start"
+    fi
+    return 0
+  fi
+  # Resume and the preview step rerun this step after the answers change.
+  for f in /usr/local/bin/toe /etc/portage/postsync.d/60-toe /usr/share/bash-completion/completions/toe \
+    /usr/share/fish/vendor_completions.d/toe.fish; do
+    if [[ -e $GI_TARGET$f ]]; then run_cmd rm -f -- "$GI_TARGET$f"; fi
+  done
 }
 
 # On btrfs: snapshot takes a read-only snapshot of / in /.snapshots (@snapshots), and Portage runs
