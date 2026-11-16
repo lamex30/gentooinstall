@@ -122,7 +122,7 @@ _q_hub() { # returns 0 to go on, 1 on back (compile preview only)
 _q_section_help() {
   case $1 in
     Keyboard) echo "Keyboard: the console layout every password is typed with" ;;
-    Disk) echo "Disk: the whole disk or its free space, filesystem, encryption, swap" ;;
+    Disk) echo "Disk: the whole disk, its free space or your own partitions, filesystem, encryption, swap" ;;
     System) echo "System: init system, kernel, bootloader" ;;
     Desktop) echo "Desktop: desktop, login screen, audio, Bluetooth, power, browser, fonts" ;;
     Network) echo "Network: network manager, Wi-Fi, hostname, SSH" ;;
@@ -140,6 +140,7 @@ _q_summary() { # SECTION: one line for the hub
     Keyboard) printf '%s' "${CFG[keymap]}" ;;
     Disk)
       if [[ ${CFG[disk_mode]} == free ]]; then extra=" free space"; fi
+      if [[ ${CFG[disk_mode]} == manual ]]; then extra=" own partitions"; fi
       printf '%s%s, %s' "$(_q_disk_name)" "$extra" "$(_q_layout)"
       ;;
     System)
@@ -219,13 +220,22 @@ _q_keys() { # SECTION: prints KEY<TAB>LABEL<TAB>HELP for each setting it shows
   case $1 in
     Keyboard) _q_row keymap Keymap "The console keyboard layout" ;;
     Disk)
-      _q_row disk_mode "Install to" "The whole disk, or the free space beside what's on it"
+      _q_row disk_mode "Install to" "The whole disk, the free space beside what's on it, or partitions you make"
       _q_row disk Disk "The disk to install Gentoo on"
+      if [[ ${CFG[disk_mode]:-} == manual ]]; then
+        _q_row cfdisk "Edit partitions" "Open cfdisk to make, delete or resize partitions, then pick them"
+        _q_row esp_part "EFI partition" "A new EFI System partition for this install; it is erased"
+        _q_row root_part "Root partition" "The partition Gentoo goes on; it is erased"
+      fi
       _q_row filesystem Filesystem "The filesystem for the root partition"
       # On btrfs /home is a subvolume of its own.
       if [[ ${CFG[filesystem]:-} == ext4 || ${CFG[filesystem]:-} == xfs ]]; then
-        _q_row home /home "On the root filesystem, or on a partition of its own"
-        if cfg_home_part; then _q_row root_size "Root size" "The root filesystem's size; /home gets the rest"; fi
+        if [[ ${CFG[disk_mode]:-} == manual ]]; then
+          _q_row home_part "/home partition" "None to keep /home on root, or a partition of its own; it is erased"
+        else
+          _q_row home /home "On the root filesystem, or on a partition of its own"
+          if cfg_home_part; then _q_row root_size "Root size" "The root filesystem's size; /home gets the rest"; fi
+        fi
       fi
       _q_row encryption Encryption "Encrypt the root partition with a passphrase"
       if [[ ${CFG[encryption]:-} == luks2 ]]; then
@@ -370,6 +380,18 @@ _q_need() { # KEY: prints "[!] why" when KEY still needs an answer
         printf '[!] LUKS passphrase not set'
       fi
       ;;
+    esp_part | root_part)
+      if [[ -z ${CFG[$k]} ]]; then
+        printf '[!] not set'
+      elif ! hw_part_find "${CFG[disk]}" "${CFG[$k]}" > /dev/null; then
+        printf '[!] not on this disk, pick again'
+      fi
+      ;;
+    home_part)
+      if [[ -n ${CFG[home_part]} ]] && ! hw_part_find "${CFG[disk]}" "${CFG[home_part]}" > /dev/null; then
+        printf '[!] not on this disk, pick again'
+      fi
+      ;;
     # _q_keys shows this row only with NetworkManager, the one network setup that uses the key.
     keep_wifi)
       if [[ ${CFG[keep_wifi]} == yes && -n ${CFG[wifi_ssid]} ]] && _q_no_secret wifi_psk; then
@@ -416,7 +438,16 @@ _q_value() { # KEY: the current value as the menus show it
     case $k in
       disk) v=$(_q_disk_label) ;;
       root_size) v="${CFG[root_size]} GiB" ;;
-      disk_mode) if [[ ${CFG[disk_mode]} == free ]]; then v="free space, keeping the partitions"; else v="the whole disk, erasing it"; fi ;;
+      disk_mode)
+        case ${CFG[disk_mode]} in
+          free) v="free space, keeping the partitions" ;;
+          manual) v="partitions you pick, made in cfdisk" ;;
+          *) v="the whole disk, erasing it" ;;
+        esac
+        ;;
+      cfdisk) v="cfdisk on $(_q_disk_name)" ;;
+      esp_part | root_part) v=$(_q_part_label "${CFG[$k]}") ;;
+      home_part) if [[ -n ${CFG[home_part]} ]]; then v=$(_q_part_label "${CFG[home_part]}"); else v="none, /home on the root filesystem"; fi ;;
       display_manager)
         v=$(_q_dm_name "$(cfg_login_screen)")
         if [[ ${CFG[display_manager]} == auto ]]; then v="auto: $v"; fi
@@ -486,10 +517,15 @@ _q_edit() { # KEY: opens the editor for one setting; returns 1 on back
       ;;
     disk) _q_disk ;;
     disk_mode)
-      _q_radio disk_mode "Install to" "Free space keeps the disk's partitions, so another system keeps working. If Windows uses BitLocker, turning Secure Boot off makes it ask for its recovery key: keep Secure Boot on (System section), or have the key ready." "" \
+      _q_radio disk_mode "Install to" "Free space keeps the disk's partitions, so another system keeps working. Your own partitions opens cfdisk, where you make, delete or resize them; you then pick the EFI, root and /home partitions, which are erased, and the rest stay. If Windows uses BitLocker, turning Secure Boot off makes it ask for its recovery key: keep Secure Boot on (System section), or have the key ready." "" \
         wipe "The whole disk." "Erases everything on it." \
-        free "Free space on the disk." "Keeps its partitions, like Windows. Shrink one from its own system first."
+        free "Free space on the disk." "Keeps its partitions, like Windows. Shrink one from its own system first." \
+        manual "Partitions you make yourself." "cfdisk opens now; the partitions you pick are erased, the rest stay." ||
+        return 1
+      if [[ ${CFG[disk_mode]} == manual && -n ${CFG[disk]:-} && -z ${CFG[root_part]:-} ]]; then _q_cfdisk || true; fi
       ;;
+    cfdisk) _q_cfdisk ;;
+    esp_part | root_part | home_part) _q_part "$key" ;;
     filesystem)
       _q_radio filesystem "Root filesystem" "" ext4 \
         ext4 "The standard Linux filesystem." "Mature and simple; the safe choice." \
@@ -497,7 +533,10 @@ _q_edit() { # KEY: opens the editor for one setting; returns 1 on back
         btrfs "Snapshots and compression." "Uses subvolumes for /, /home, logs, cache and snapshots." ||
         return 1
       # btrfs gives /home a subvolume instead.
-      if [[ ${CFG[filesystem]} == btrfs ]] && cfg_home_part; then cfg_set home root; fi
+      if [[ ${CFG[filesystem]} == btrfs ]] && cfg_home_part; then
+        cfg_set home root
+        cfg_set home_part ''
+      fi
       ;;
     home)
       _q_radio home "/home" "" root \
@@ -1185,7 +1224,9 @@ _q_layout() {
     file) swap='swap file' ;;
     hibernate) swap='swap file for hibernation' ;;
   esac
-  if cfg_home_part; then
+  if cfg_home_part && [[ ${CFG[disk_mode]:-} == manual ]]; then
+    printf '%s root + /home%s, %s' "${CFG[filesystem]}" "$luks" "$swap"
+  elif cfg_home_part; then
     printf '%s root of %s GiB + /home%s, %s' "${CFG[filesystem]}" "${CFG[root_size]}" "$luks" "$swap"
   else
     printf '%s root%s, %s' "${CFG[filesystem]}" "$luks" "$swap"
@@ -1198,6 +1239,9 @@ _q_disk() {
   if [[ ${CFG[disk_mode]:-} == free ]]; then
     title="Disk to install to"
     text="Gentoo goes into the largest free space of the chosen disk, and its partitions stay."
+  elif [[ ${CFG[disk_mode]:-} == manual ]]; then
+    title="Disk to partition"
+    text="You make the partitions in cfdisk, then pick the ones Gentoo uses. Only those are erased."
   fi
   for line in "${GI_Q_DISKS[@]}"; do
     _q_disk_read "$line"
@@ -1220,6 +1264,134 @@ _q_disk() {
   done
 }
 
+# --- Own partitions (disk_mode=manual) -----------------------------------------
+
+# Opens cfdisk on the chosen disk, then walks through picking the partitions.
+_q_cfdisk() {
+  local dev
+  if [[ -z ${CFG[disk]:-} ]]; then
+    ui_msg "Edit partitions" "Pick the disk first."
+    return 1
+  fi
+  # -m: the by-id link may be missing in a test or on a disk that just went away; cfdisk then says so.
+  dev=$(readlink -m -- "${CFG[disk]}")
+  [[ ${dev##*/} != "${HW[live_disk]:-}" ]] || {
+    ui_msg "Edit partitions" "$dev holds the live system."
+    return 1
+  }
+  ui_msg "Edit partitions" "cfdisk opens on $dev. On an empty disk pick gpt as the label type. Make an EFI System partition for Gentoo (1 GiB; Windows keeps its own), a Linux filesystem partition for root and, if you like, one for /home. Write, then Quit. Nothing is formatted until the install starts."
+  run_interactive cfdisk "$dev" || true
+  # cfdisk asks the kernel to reread the table; udev then makes the by-partuuid links.
+  run_cmd udevadm settle || true
+  _q_part esp_part || return 0
+  _q_part root_part || return 0
+  if [[ ${CFG[filesystem]:-ext4} != btrfs ]]; then _q_part home_part || true; fi
+}
+
+_q_ptype() { # GUID: a short name for a GPT partition type
+  case $1 in
+    c12a7328-f81f-11d2-ba4b-00a0c93ec93b) echo "EFI System" ;;
+    4f68bce3-e8cd-4db1-96e7-fbcaf984b709) echo "Linux root" ;;
+    933ac7e1-2eb4-4f13-b844-0e14e2aef915) echo "Linux home" ;;
+    0fc63daf-8483-4772-8e79-3d69d8477de4) echo "Linux filesystem" ;;
+    0657fd6d-a4ab-43c4-84e5-0933c84b4f4f) echo "Linux swap" ;;
+    ebd0a0a2-b9e5-4433-87c0-68b6b72699c7) echo "Windows data" ;;
+    e3c9e316-0b5c-4db8-817d-f92df00215ae) echo "Microsoft reserved" ;;
+    de94bba4-06d1-4d40-a16a-bfd50179d6ac) echo "Windows recovery" ;;
+    '') echo "no type" ;;
+    *) echo "other type" ;;
+  esac
+}
+
+_q_psize() { # BYTES: MB below a gigabyte, so an ESP doesn't show as 1 GB
+  if [[ $1 =~ ^[0-9]+$ ]] && (($1 < 10 ** 9)); then
+    printf '%d MB' $((($1 + 5 * 10 ** 5) / 10 ** 6))
+  else
+    _q_size "$1"
+  fi
+}
+
+_q_part_text() { # SIZE FSTYPE PARTTYPE
+  printf '%s  %s  %s' "$(_q_psize "$1")" "${2:-no filesystem}" "$(_q_ptype "$3")"
+}
+
+_q_part_label() { # VALUE: "nvme0n1p6  50 GB  ext4  Linux filesystem", or the value when it's gone
+  local line name size fs ptype
+  if line=$(hw_part_find "${CFG[disk]}" "$1"); then
+    IFS=$'\x1f' read -r name size fs ptype _ <<< "$line"
+    printf '%s  %s' "${name##*/}" "$(_q_part_text "$size" "$fs" "$ptype")"
+  else
+    printf '%s' "$1"
+  fi
+}
+
+_q_part() { # KEY: picks esp_part, root_part or home_part among the chosen disk's partitions
+  local key=$1 line name size fs ptype puuid label title text def='' v picked=""
+  local -a items=() lines=()
+  if [[ -z ${CFG[disk]:-} ]]; then
+    ui_msg "Partitions" "Pick the disk first."
+    return 1
+  fi
+  mapfile -t lines < <(hw_disk_parts "${CFG[disk]}")
+  case $key in
+    esp_part)
+      title="EFI partition"
+      text="The EFI system partition for this install. It is erased, and gets the bootloader and, with systemd-boot or Limine, the kernels: 1 GiB is best, 512 MiB at least. Don't pick Windows' own; make a new one in cfdisk, and Windows still shows in the boot menu."
+      ;;
+    root_part) title="Root partition" text="The partition Gentoo goes on. It is erased. These answers need at least $(cfg_root_min) GiB on it." ;;
+    home_part)
+      title="/home partition"
+      text="A partition of its own for /home, or none to keep /home on the root filesystem. A picked one is erased."
+      items+=(none "None, /home on the root filesystem" "Keeps /home on root")
+      def=none
+      ;;
+  esac
+  if ((${#lines[@]} == 0)); then
+    ui_msg "$title" "$(_q_disk_name) has no partitions yet. Make them with Edit partitions first."
+    return 1
+  fi
+  if [[ -n ${CFG[$key]:-} ]]; then picked=$(hw_part_find "${CFG[disk]}" "${CFG[$key]}") || picked=''; fi
+  for line in "${lines[@]}"; do
+    IFS=$'\x1f' read -r name size fs ptype puuid label <<< "$line"
+    items+=("${name##*/}" "$(_q_part_text "$size" "$fs" "$ptype")" "${label:-no name}")
+    if [[ -n $picked && ${picked%%$'\x1f'*} == "$name" ]]; then def=${name##*/}; fi
+  done
+  while :; do
+    v=$(ui_menu --ok Select "$title" "$text" "$def" "${items[@]}") || return 1
+    if [[ $v == none ]]; then
+      cfg_set "$key" ''
+      return 0
+    fi
+    for line in "${lines[@]}"; do
+      IFS=$'\x1f' read -r name size fs ptype puuid label <<< "$line"
+      [[ ${name##*/} == "$v" ]] || continue
+      if [[ -z $puuid ]]; then
+        ui_msg "$title" "$v has no partition UUID: the disk needs a GPT. Make one in cfdisk."
+        continue 2
+      fi
+      _q_set "$key" "/dev/disk/by-partuuid/$puuid" && return 0
+    done
+  done
+}
+
+# Checks for disk_mode=manual that need the disk: a GPT, and the picked partitions still on it.
+_q_manual_check() { # prints error: lines; returns 1 on one
+  local pt key rc=0 name
+  name=$(_q_disk_name)
+  read -r pt _ < <(hw_disk_free "${CFG[disk]}") || pt=unknown
+  if [[ $pt != gpt ]]; then
+    echo "error: Your own partitions need a GPT partition table, and $name has ${pt/dos/an MBR one}. Make a GPT in cfdisk (Edit partitions), or install to the whole disk."
+    return 1
+  fi
+  for key in esp_part root_part home_part; do
+    if [[ -n ${CFG[$key]:-} ]] && ! hw_part_find "${CFG[disk]}" "${CFG[$key]}" > /dev/null; then
+      echo "error: $key: ${CFG[$key]} isn't a partition of $name any more. Pick it again."
+      rc=1
+    fi
+  done
+  return "$rc"
+}
+
 # --- Install -----------------------------------------------------------------
 
 # cfg_check_rules plus what only this part knows: the disk list and which secrets were typed here.
@@ -1236,6 +1408,8 @@ _q_check() { # prints error: and warn: lines; returns 1 on an error
     rc=1
   elif [[ -n ${CFG[disk]:-} && ${CFG[disk_mode]} == free ]]; then
     _q_free_check || rc=1
+  elif [[ -n ${CFG[disk]:-} && ${CFG[disk_mode]} == manual ]]; then
+    _q_manual_check || rc=1
   fi
   # With SECRET emptied (in this subshell only), it lists every secret the answers use.
   mapfile -t keys < <(SECRET=(); cfg_secrets_missing "${GI_STEPS[@]}")
@@ -1289,6 +1463,8 @@ _q_review_text() {
   done
   if [[ ${CFG[disk_mode]} == free ]]; then
     printf 'Disk layout: 1 GiB ESP + %s, in the free space; the other partitions stay\n' "$(_q_layout)"
+  elif [[ ${CFG[disk_mode]} == manual ]]; then
+    printf 'Disk layout: %s, on partitions you picked; they are erased, the other partitions stay\n' "$(_q_layout)"
   else
     printf 'Disk layout: 1 GiB ESP + %s\n' "$(_q_layout)"
   fi
@@ -1302,6 +1478,15 @@ _q_confirm() {
     printf -v text 'Disk     %s\nKeeps    %s\nAdds     1 GiB ESP + %s, in %s of free space\n\nType %s to confirm:' \
       "$(_q_disk_label)" "${summary:-no partitions found}" "$(_q_layout)" "$(_q_free_size "$byid")" "$name"
     ui_confirm_text "Install into the free space on $name?" "$text" "$name"
+    return
+  fi
+  if [[ ${CFG[disk_mode]} == manual ]]; then
+    local home=''
+    if [[ -n ${CFG[home_part]:-} ]]; then home="         /home $(_q_part_label "${CFG[home_part]}")"$'\n'; fi
+    printf -v text 'Disk     %s\nErases   EFI %s\n         root %s\n%sKeeps    every other partition\nLayout   %s\n\nType %s to confirm:' \
+      "$(_q_disk_label)" "$(_q_part_label "${CFG[esp_part]}")" "$(_q_part_label "${CFG[root_part]}")" \
+      "$home" "$(_q_layout)" "$name"
+    ui_confirm_text "Erase the picked partitions on $name and install?" "$text" "$name"
     return
   fi
   printf -v text 'Disk     %s\nNow on   %s. All of it will be deleted.\nLayout   1 GiB ESP + %s\n\nType %s to confirm:' \

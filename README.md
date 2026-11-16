@@ -8,7 +8,7 @@ A guided installer for Gentoo Linux, like Arch's `archinstall`. You answer a few
 
 ![The installer's menus: the keys, sections still needing an answer, installing into free space, a desktop and login screen, the timezone picker and the package search](docs/demo.gif)
 
-**It erases the whole disk you pick**, unless you install into its free space, next to Windows or another system (see [Next to Windows](#next-to-windows)).
+**It erases the whole disk you pick**, unless you install into its free space, next to Windows or another system (see [Next to Windows](#next-to-windows)), or onto partitions you make yourself in cfdisk (see [Your own partitions](#your-own-partitions)).
 
 Status: early. Tested in virtual machines and on one laptop.
 
@@ -35,7 +35,7 @@ Status: early. Tested in virtual machines and on one laptop.
 
 ## What you can choose
 
-- The whole disk, or its free space beside another system
+- The whole disk, its free space beside another system, or partitions you make yourself in cfdisk
 - OpenRC or systemd
 - ext4, xfs or btrfs, with optional disk encryption, and on ext4 or xfs /home on a partition of its own. On btrfs, every update starts with a snapshot you can roll back to with `rollback`
 - Swap in compressed RAM, a swap file, or a swap file big enough to hibernate
@@ -52,6 +52,17 @@ Status: early. Tested in virtual machines and on one laptop.
 - toe, which installs and removes packages by name: it finds `mangowm` from `mangowindowmanager`, shows what downloads prebuilt and what compiles, and asks before it changes `/etc/portage` (`toe undo` reverts that)
 
 Budgie, Hyprland, niri and MangoWM come from community overlays that Gentoo doesn't review, and they build from source.
+
+## Your own partitions
+
+Set **Install to** to **Partitions you make yourself**. cfdisk opens on the disk (again any time from **Edit partitions**):
+
+1. On an empty disk, choose `gpt` as the label type.
+2. Make an **EFI System** partition for Gentoo, 1 GiB (512 MiB at least). Don't reuse Windows' one: Windows keeps its own and still shows in the boot menu.
+3. Make a **Linux filesystem** partition for root, at least 20 GiB (40 GiB with a desktop), and if you like another one for /home.
+4. **Write**, then **Quit**, and pick the EFI, root and /home partitions in the lists that follow.
+
+Only the partitions you picked are erased, when the install starts; every other partition stays as it was. The review and the confirmation list them.
 
 ## Next to Windows
 

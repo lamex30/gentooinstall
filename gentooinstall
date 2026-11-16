@@ -84,7 +84,7 @@ gi_resume() { # USER_CONFIG PSK_FROM_SECRETS
   cp -- "$dir/state" "$GI_RUN_DIR/state"
   CFG=()
   cfg_load "$dir/config" || exit 2
-  cfg_lock disk disk_mode filesystem home root_size encryption swap init
+  cfg_lock disk disk_mode esp_part root_part home_part filesystem home root_size encryption swap init
   cfg_defaults_apply
   for k in "${!CFG[@]}"; do saved[$k]=${CFG[$k]}; done
   if [[ -n $1 ]]; then cfg_load "$1" || exit 2; fi

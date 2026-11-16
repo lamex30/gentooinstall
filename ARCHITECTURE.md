@@ -140,7 +140,8 @@ File format and rules are in `SPEC.md` under "Config file". Keys, values and def
 | `disk` | `/dev/disk/by-id/...`, or `/dev/disk/by-path/...` for a disk with no by-id link (a QEMU virtio disk without a serial) | required |
 | `home` | `root` `partition` | `root`. `partition` gives /home a partition of its own (ext4 and xfs); `cfg_home_part` |
 | `root_size` | GiB, 10 to 99999 | `80`. Root's size with `home=partition` |
-| `disk_mode` | `wipe` `free` | `wipe`. `free` installs into the largest free space of the disk's GPT; `hw_disk_free` reports it |
+| `disk_mode` | `wipe` `free` `manual` | `wipe`. `free` installs into the largest free space of the disk's GPT; `hw_disk_free` reports it. `manual` (this fork) uses partitions the user made in cfdisk and picked |
+| `esp_part`, `root_part`, `home_part` | `/dev/disk/by-partuuid/...` (any `/dev/` partition path in a config file), or empty | empty. Used with `disk_mode=manual` only; `esp_part` and `root_part` are then required, `home_part` empty means /home on root. `hw_disk_parts` lists a disk's partitions, `hw_part_find` resolves a pick |
 | `filesystem` | `ext4` `xfs` `btrfs` | `ext4` |
 | `encryption` | `none` `luks2` | `none` |
 | `luks_discard` | `yes` `no` | `yes` |

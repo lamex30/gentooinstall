@@ -89,7 +89,7 @@ _finish_first_steps() {
       if [[ ${CFG[secure_boot]} == yes ]]; then
         printf 'Secure Boot: if the MokManager screen never came, or the code was wrong,\nask for the key to be enrolled again; it asks for a new code to type at\nthe next start:\n  # mokutil --import /etc/portage/secureboot.der\n\n'
       fi
-      if [[ ${CFG[disk_mode]} == free ]]; then
+      if [[ ${CFG[disk_mode]} == free || ${CFG[disk_mode]} == manual ]]; then
         printf 'The systems that were on the disk before are still there. Any not in the\nboot menu start from the firmware boot menu: press a key like F12, F11 or\nEsc while the computer starts.\n\n'
       fi
       printf 'Lines starting with # need root: type %s in front of them if your\naccount is an admin, or log in as root.\n\n' "${CFG[privilege]}"

@@ -370,6 +370,46 @@ _hw_disk_summary() { # PARTS WINDOWS FSTYPE...
   printf '%s\n' "${s%, }"
 }
 
+# Prints one line per partition of DISK: NAME SIZE FSTYPE PARTTYPE PARTUUID PARTLABEL, separated by
+# the unit separator \x1f (read keeps its empty fields, which tabs, being IFS white space, would merge),
+# with SIZE in bytes and PARTTYPE as a lowercase GUID. Read from lsblk's KEY="value" output, so
+# empty fields and labels with spaces keep their places.
+hw_disk_parts() { # /dev/disk/by-id/... or /dev/disk/by-path/...
+  local dev line k type
+  local -A f=()
+  dev=$(readlink -f -- "$GI_HOST_ROOT$1") || return 1
+  while IFS= read -r line; do
+    f=()
+    for k in NAME TYPE SIZE FSTYPE PARTTYPE PARTUUID PARTLABEL; do
+      if [[ $line =~ (^|[[:space:]])$k=\"([^\"]*)\" ]]; then f[$k]=${BASH_REMATCH[2]}; fi
+    done
+    type=${f[TYPE]:-}
+    [[ $type == part ]] || continue
+    printf '%s\x1f%s\x1f%s\x1f%s\x1f%s\x1f%s\n' "${f[NAME]:-}" "${f[SIZE]:-0}" "${f[FSTYPE]:-}" "${f[PARTTYPE],,}" "${f[PARTUUID],,}" "${f[PARTLABEL]:-}"
+  done < <(lsblk -nbpP -o NAME,TYPE,SIZE,FSTYPE,PARTTYPE,PARTUUID,PARTLABEL -- "/dev/${dev##*/}" 2> /dev/null)
+}
+
+# Prints the hw_disk_parts line of DISK's partition VALUE names: a /dev/disk/by-partuuid/ path by its
+# PARTUUID (so it works while udev hasn't made the link yet), anything else by the device it
+# resolves to. Returns 1 when VALUE isn't a partition of DISK.
+hw_part_find() { # DISK VALUE
+  local want=$2 dev='' line name puuid
+  if [[ $want == /dev/disk/by-partuuid/* ]]; then
+    want=${want##*/}
+    want=${want,,}
+  else
+    dev=$(readlink -f -- "$GI_HOST_ROOT$want") || return 1
+  fi
+  while IFS= read -r line; do
+    IFS=$'\x1f' read -r name _ _ _ puuid _ <<< "$line"
+    if [[ -n $dev && ${name##*/} == "${dev##*/}" ]] || [[ -z $dev && -n $puuid && $puuid == "$want" ]]; then
+      printf '%s\n' "$line"
+      return 0
+    fi
+  done < <(hw_disk_parts "$1")
+  return 1
+}
+
 # Prints "PTTYPE START SECTORS SECTOR_SIZE" for DISK's largest unpartitioned space, counted in its
 # own sectors. PTTYPE is gpt, dos or none; START and SECTORS are 0 when nothing is free.
 hw_disk_free() { # /dev/disk/by-id/... or /dev/disk/by-path/...

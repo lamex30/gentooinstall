@@ -514,3 +514,26 @@ EOF
   run hw_disk_free /dev/disk/by-id/nvme-Samsung_SSD_980_1TB_S64ANS0T123456
   [ "$output" = "none 0 0 4096" ]
 }
+
+@test "hw_disk_parts keeps empty fields and labels with spaces, and hw_part_find finds a pick by PARTUUID or device" {
+  fake_disks
+  lsblk() {
+    # lsblk -P as util-linux prints it: the disk, then its partitions; a new one has no filesystem yet.
+    cat << 'LSBLK'
+NAME="/dev/nvme0n1" TYPE="disk" SIZE="1000204886016" FSTYPE="" PARTTYPE="" PARTUUID="" PARTLABEL=""
+NAME="/dev/nvme0n1p1" TYPE="part" SIZE="104857600" FSTYPE="vfat" PARTTYPE="C12A7328-F81F-11D2-BA4B-00A0C93EC93B" PARTUUID="AAAA-1111" PARTLABEL="EFI system partition"
+NAME="/dev/nvme0n1p5" TYPE="part" SIZE="1073741824" FSTYPE="" PARTTYPE="c12a7328-f81f-11d2-ba4b-00a0c93ec93b" PARTUUID="5555-aaaa" PARTLABEL=""
+LSBLK
+  }
+  run hw_disk_parts /dev/disk/by-id/nvme-Samsung_SSD_980_1TB_S64ANS0T123456
+  [ "$status" -eq 0 ]
+  [ "${#lines[@]}" -eq 2 ]
+  [ "${lines[0]}" = "/dev/nvme0n1p1"$'\x1f'"104857600"$'\x1f'"vfat"$'\x1f'"c12a7328-f81f-11d2-ba4b-00a0c93ec93b"$'\x1f'"aaaa-1111"$'\x1f'"EFI system partition" ]
+  IFS=$'\x1f' read -r name size fs ptype puuid label <<< "${lines[1]}"
+  [ "$name $size ${fs:-none} $puuid ${label:-none}" = "/dev/nvme0n1p5 1073741824 none 5555-aaaa none" ]
+  run hw_part_find /dev/disk/by-id/nvme-Samsung_SSD_980_1TB_S64ANS0T123456 /dev/disk/by-partuuid/5555-AAAA
+  [ "$status" -eq 0 ]
+  [[ $output == /dev/nvme0n1p5$'\x1f'* ]]
+  run hw_part_find /dev/disk/by-id/nvme-Samsung_SSD_980_1TB_S64ANS0T123456 /dev/disk/by-partuuid/gone
+  [ "$status" -eq 1 ]
+}

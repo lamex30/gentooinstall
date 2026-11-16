@@ -949,3 +949,68 @@ EOF
   q_run 'cfg_defaults_apply ask; CFG[keymap]=us; cfg_set binpkgs yes; cfg_set tune no; questions_run' b y
   [[ $stderr =~ Packages\ +binary\ packages,\ toe ]]
 }
+
+# Partitions of the big disk for disk_mode=manual: Windows' ESP, a new ESP and a new root.
+MANUAL='source <(sed -n "/^hw_part_find()/,/^}/p" "$GI_HOME/lib/hw.sh")
+hw_disk_free() { echo "gpt 0 0 512"; }
+hw_disk_parts() {
+  printf "%s\x1f%s\x1f%s\x1f%s\x1f%s\x1f%s\n" /dev/nvme0n1p1 104857600 vfat c12a7328-f81f-11d2-ba4b-00a0c93ec93b 1111aaaa "EFI system partition" \
+    /dev/nvme0n1p5 1073741824 "" c12a7328-f81f-11d2-ba4b-00a0c93ec93b 5555aaaa "" \
+    /dev/nvme0n1p6 107374182400 "" 0fc63daf-8483-4772-8e79-3d69d8477de4 6666aaaa ""
+}'
+
+@test "own partitions: picking them opens cfdisk on the disk, then asks for the EFI, root and /home partitions" {
+  q_run "$MANUAL"'
+    cfg_defaults_apply ask; CFG[keymap]=us; cfg_set disk "$BIG"; questions_run' 2 1 3 2 3 1 b b y
+  [ "$status" -eq 130 ]
+  grep -qxF "cfdisk $(readlink -m "$BIG")" "$STUB_LOG"
+  [[ $stderr == *"== EFI partition =="* ]]
+  [[ $stderr == *"nvme0n1p1  105 MB  vfat  EFI System"* ]]
+  [[ $stderr == *"nvme0n1p6  107 GB  no filesystem  Linux filesystem"* ]]
+  [[ $stderr == *"== /home partition =="* ]]
+  [[ $stderr =~ Install\ to\ +partitions\ you\ pick ]]
+  [[ $stderr =~ Root\ partition\ +nvme0n1p6 ]]
+  source "$STATE"
+  [ "${CFG[disk_mode]}" = manual ]
+  [ "${CFG[esp_part]}" = /dev/disk/by-partuuid/5555aaaa ]
+  [ "${CFG[root_part]}" = /dev/disk/by-partuuid/6666aaaa ]
+  [ -z "${CFG[home_part]}" ]
+}
+
+@test "own partitions: the review and the confirmation list what is erased and what stays" {
+  q_run "$MANUAL"'
+    cfg_defaults_apply; cfg_set disk "$BIG"; cfg_set disk_mode manual; cfg_set users larry
+    cfg_set esp_part /dev/disk/by-partuuid/5555aaaa; cfg_set root_part /dev/disk/by-partuuid/6666aaaa; cfg_defaults_apply
+    SECRET[user.larry.password]=$PW SECRET[root_password]=$PW; questions_run; echo done' \
+    '' '' nvme0n1
+  [ "$status" -eq 0 ]
+  [ "$output" = done ]
+  [[ $stderr == *"Disk layout: ext4 root, zram swap, on partitions you picked; they are erased, the other partitions stay"* ]]
+  [[ $stderr == *"== Erase the picked partitions on nvme0n1 and install? =="* ]]
+  [[ $stderr == *"Erases   EFI nvme0n1p5  1 GB  no filesystem  EFI System"$'\n'"         root nvme0n1p6  107 GB  no filesystem  Linux filesystem"$'\n'"Keeps    every other partition"* ]]
+  [[ $stderr != *"will be deleted"* ]]
+}
+
+@test "own partitions: Install is blocked without a GPT, or when a pick is gone from the disk" {
+  local code='cfg_defaults_apply; cfg_set disk "$BIG"; cfg_set disk_mode manual; cfg_set users larry
+    cfg_set esp_part /dev/disk/by-partuuid/5555aaaa; cfg_set root_part /dev/disk/by-partuuid/0000dead
+    mapfile -t GI_Q_DISKS < <(hw_disks); _q_check'
+  q_run "$MANUAL; $code"
+  [ "$status" -eq 1 ]
+  [[ $output == *"error: root_part: /dev/disk/by-partuuid/0000dead isn't a partition of nvme0n1 any more. Pick it again."* ]]
+  q_run "$MANUAL; hw_disk_free() { echo 'dos 0 0 512'; }; $code"
+  [ "$status" -eq 1 ]
+  [[ $output == *"error: Your own partitions need a GPT partition table, and nvme0n1 has an MBR one."* ]]
+  q_run "$MANUAL; ${code/0000dead/6666aaaa}"
+  [ "$status" -eq 0 ]
+}
+
+@test "own partitions: switching to btrfs drops a picked /home partition, whose row it hides" {
+  q_run "$MANUAL"'
+    cfg_defaults_apply; CFG[keymap]=us; cfg_set disk "$BIG"; cfg_set disk_mode manual; cfg_set filesystem ext4
+    cfg_set home_part /dev/disk/by-partuuid/1111aaaa; _q_edit filesystem' 3
+  [ "$status" -eq 0 ]
+  source "$STATE"
+  [ "${CFG[filesystem]}" = btrfs ]
+  [ -z "${CFG[home_part]}" ]
+}

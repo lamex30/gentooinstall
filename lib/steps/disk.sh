@@ -6,12 +6,14 @@
 #   gentooinstall-root  Linux root (x86-64), the rest, filesystem labeled root
 #   gentooinstall-home  Linux /home, with home=partition: root gets root_size GiB and this the rest
 # With disk_mode=wipe they are partitions 1 and 2 of a new GPT. With free they go into the largest
-# unpartitioned space of the disk's GPT, and every other partition stays as it was.
+# unpartitioned space of the disk's GPT, and every other partition stays as it was. With manual the
+# user made the partitions in cfdisk and picked them (esp_part, root_part, home_part); they get these
+# names and types, the format stage erases them, and every other partition stays as it was.
 # The state key disk.stage (partitioned, formatted, mounted) records progress. A retry skips the
 # stages already finished, and once root is mounted nothing destructive runs again.
 
 step_define disk "Disk preparation" \
-  "Wipe the chosen disk and create a GPT, or use the free space of the disk's GPT, for an EFI system partition and a root partition. Encrypt root with LUKS2 if chosen, make the filesystems and mount them where the new system is built." \
+  "Wipe the chosen disk and create a GPT, use the free space of the disk's GPT, or use the partitions you made in cfdisk, for an EFI system partition and a root partition. Encrypt root with LUKS2 if chosen, make the filesystems and mount them where the new system is built." \
   "https://wiki.gentoo.org/wiki/Handbook:AMD64/Installation/Disks"
 
 step_disk() {
@@ -32,6 +34,8 @@ step_disk() {
         :
       elif [[ ${CFG[disk_mode]} == free ]]; then
         _disk_partition_free "$dev"
+      elif [[ ${CFG[disk_mode]} == manual ]]; then
+        _disk_partition_manual "$dev"
       else
         _disk_partition "$dev"
       fi
@@ -166,6 +170,60 @@ start=$rstart, size=$rn, type=4F68BCE3-E8CD-4DB1-96E7-FBCAF984B709, name=gentooi
   run_stdin "$script" sfdisk --append --backup --backup-file "$GI_RUN_DIR/gpt-backup" "${CFG[disk]}"
   run_cmd udevadm settle
   state_set disk.stage partitioned
+}
+
+# disk_mode=manual: names and types the picked partitions like the other modes' own, so every later
+# lookup, --resume and --rescue find them the same way. Only GPT entries change here; nothing is
+# erased before the format stage. An earlier install's names on partitions not picked now are
+# renamed to old-*, since two of a name would make every lookup ambiguous.
+_disk_partition_manual() { # DEV
+  local dev=$1 pt key part name label n line type
+  local -A pick=() num=()
+  local -a order=(esp root)
+  pt=$(lsblk -dno PTTYPE -- "$dev") || die "Can't read the partition table of $dev."
+  [[ $pt == gpt ]] || die "$dev has no GPT partition table. Make one in cfdisk (it asks for the label type on an empty disk), or install to the whole disk."
+  if [[ -n ${CFG[home_part]:-} ]]; then order+=(home); fi
+  for key in "${order[@]}"; do
+    [[ -n ${CFG[${key}_part]:-} ]] || die "No $key partition was picked. Pick one in the Disk section."
+    line=$(hw_part_find "${CFG[disk]}" "${CFG[${key}_part]}") ||
+      die "The picked $key partition ${CFG[${key}_part]} isn't on $dev any more. Pick it again in the Disk section."
+    IFS=$'\x1f' read -r part _ <<< "$line"
+    for name in "${pick[@]}"; do [[ $name != "$part" ]] || die "The EFI, root and /home partitions must be three different partitions."; done
+    n=$(cat -- "${GI_HOST_ROOT:-}/sys/class/block/${part##*/}/partition") || die "Can't read the partition number of $part."
+    pick[$key]=$part num[$key]=$n
+  done
+  # The format stage erases the ESP, and the bootloader step puts its fallback loader there.
+  if _disk_holds_windows "${pick[esp]}"; then
+    die "${pick[esp]} is Windows' EFI partition, and this install erases the one it gets. Make a new EFI System partition for Gentoo in cfdisk (1 GiB); Windows still appears in the boot menu."
+  fi
+  while read -r name label; do
+    [[ $label =~ ^gentooinstall-(esp|root|home)$ ]] || continue
+    [[ $name != "${pick[esp]}" && $name != "${pick[root]}" && $name != "${pick[home]:-}" ]] || continue
+    n=$(cat -- "${GI_HOST_ROOT:-}/sys/class/block/${name##*/}/partition") || die "Can't read the partition number of $name."
+    run_cmd sfdisk --part-label "${CFG[disk]}" "$n" "old-$label"
+  done < <(lsblk -nrpo NAME,PARTLABEL "$dev")
+  for key in "${order[@]}"; do
+    case $key in
+      esp) type=C12A7328-F81F-11D2-BA4B-00A0C93EC93B ;;
+      root) type=4F68BCE3-E8CD-4DB1-96E7-FBCAF984B709 ;;
+      home) type=933AC7E1-2EB4-4F13-B844-0E14E2AEF915 ;;
+    esac
+    run_cmd sfdisk --part-type "${CFG[disk]}" "${num[$key]}" "$type"
+    run_cmd sfdisk --part-label "${CFG[disk]}" "${num[$key]}" "gentooinstall-$key"
+  done
+  run_cmd udevadm settle
+  state_set disk.stage partitioned
+}
+
+# True when PART is a FAT filesystem holding Windows' boot manager. Mounted read-only to look.
+_disk_holds_windows() { # PART
+  local dir=$GI_RUN_DIR/esp-check found=1
+  ((!GI_DRY_RUN)) || return 1
+  run_cmd mkdir -p "$dir"
+  run_cmd mount -o ro -t vfat "$1" "$dir" || return 1
+  if [[ -f $dir/EFI/Microsoft/Boot/bootmgfw.efi ]]; then found=0; fi
+  run_cmd umount "$dir"
+  return "$found"
 }
 
 # Prints the partition of DEV with the GPT name NAME.

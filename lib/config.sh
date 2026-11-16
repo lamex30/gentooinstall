@@ -1,7 +1,7 @@
 # shellcheck shell=bash
 # Config: key schema, defaults, validators, load and save, secrets, combination rules.
 
-GI_CFG_KEYS=(format keymap disk disk_mode filesystem home root_size encryption luks_discard swap init desktop
+GI_CFG_KEYS=(format keymap disk disk_mode esp_part root_part home_part filesystem home root_size encryption luks_discard swap init desktop
   gnome_variant display_manager bootloader secure_boot kernel kernel_version nvidia_driver network keep_wifi wifi_ssid
   audio bluetooth power thermald fwupd printing fingerprint sshd flatpak hostname timezone locales lang root users
   privilege mirror binpkgs cflags makeopts emerge_jobs tune browser fonts_cjk media_keys packages toe explain)
@@ -66,7 +66,15 @@ _cfg_check() { # KEY VALUE; prints the problem and returns 1
         return 1
       fi
       ;;
-    disk_mode) _cfg_enum "$v" wipe free ;;
+    disk_mode) _cfg_enum "$v" wipe free manual ;;
+    esp_part | root_part | home_part)
+      [[ -n $v ]] || return 0 # not picked yet (home_part: none); cfg_check_rules requires esp and root with manual
+      _cfg_re "$v" '^/dev/[A-Za-z0-9][A-Za-z0-9/_.:+-]*$' 'must be a partition under /dev, like /dev/disk/by-partuuid/...' || return 1
+      if [[ $v == */. || $v == */.. || $v == */../* || $v == */./* ]]; then
+        echo 'must be a plain partition path'
+        return 1
+      fi
+      ;;
     filesystem) _cfg_enum "$v" ext4 xfs btrfs ;;
     home) _cfg_enum "$v" root partition ;;
     root_size) _cfg_re "$v" '^[1-9][0-9]{1,4}$' 'must be a size in GiB, like 80' ;;
@@ -193,8 +201,23 @@ _cfg_atom_re() {
 
 _cfg_default() { [[ -n ${CFG[$1]+x} ]] || CFG[$1]=$2; }
 
-# True when /home gets a partition of its own.
-cfg_home_part() { [[ ${CFG[home]:-root} == partition ]]; }
+# True when /home gets a partition of its own: home=partition, or with disk_mode=manual a picked home_part.
+cfg_home_part() {
+  if [[ ${CFG[disk_mode]:-} == manual ]]; then
+    [[ -n ${CFG[home_part]:-} ]]
+  else
+    [[ ${CFG[home]:-root} == partition ]]
+  fi
+}
+
+# The size in bytes of the picked partition in KEY (esp_part, root_part, home_part), from hw_part_find.
+cfg_part_size() { # KEY
+  local line size
+  [[ -n ${CFG[$1]:-} && -n ${CFG[disk]:-} ]] || return 1
+  line=$(hw_part_find "${CFG[disk]}" "${CFG[$1]}") || return 1
+  IFS=$'\x1f' read -r _ size _ <<< "$line"
+  [[ $size =~ ^[0-9]+$ ]] && printf '%s\n' "$size"
+}
 
 # The GiB the root filesystem needs at least: the system, and hibernation's swap file.
 cfg_root_min() {
@@ -216,6 +239,10 @@ cfg_defaults_apply() { # [ask]
   _cfg_default disk ''
   _cfg_default wifi_ssid "${HW[wifi_ssid]:-}"
   _cfg_default users ''
+  # Picked in the Disk section only with disk_mode=manual.
+  _cfg_default esp_part ''
+  _cfg_default root_part ''
+  _cfg_default home_part ''
   _cfg_default packages ''
   # Tuning knobs whose defaults suit almost everyone.
   _cfg_default mirror cdn
@@ -452,6 +479,28 @@ cfg_secrets_missing() { # [STEP_IDS...]
 
 _cfg_need() { [[ -n ${SECRET[$1]+x} ]] || printf '%s\n' "$1"; }
 
+# disk_mode=manual: an ESP and a root partition are picked, all different, and big enough. The
+# kernels live on the ESP with systemd-boot and Limine, hence its minimum.
+_cfg_manual_rules() {
+  local size min
+  if [[ -z ${CFG[esp_part]:-} ]]; then _cfg_rule error "esp_part: pick an EFI system partition for this install (disk_mode=manual)"; fi
+  if [[ -z ${CFG[root_part]:-} ]]; then _cfg_rule error "root_part: pick the partition Gentoo goes on (disk_mode=manual)"; fi
+  if [[ -n ${CFG[esp_part]:-} && ${CFG[esp_part]} == "${CFG[root_part]:-}" ]] ||
+    [[ -n ${CFG[home_part]:-} && (${CFG[home_part]} == "${CFG[esp_part]:-}" || ${CFG[home_part]} == "${CFG[root_part]:-}") ]]; then
+    _cfg_rule error "The EFI, root and /home partitions must be three different partitions."
+  fi
+  min=$(cfg_root_min)
+  if size=$(cfg_part_size root_part) && ((size < min * 1024 ** 3)); then
+    _cfg_rule error "The root partition is $((size / 1024 ** 3)) GiB, and these answers need at least $min GiB on it."
+  fi
+  if [[ ${CFG[bootloader]:-systemd-boot} != grub ]] && size=$(cfg_part_size esp_part) && ((size < 512 * 1024 ** 2)); then
+    _cfg_rule error "The EFI partition is $((size / 1024 ** 2)) MiB; make it at least 512 MiB (1 GiB is best), since ${CFG[bootloader]:-systemd-boot} keeps the kernels on it."
+  fi
+  if size=$(cfg_part_size home_part) && ((size < 10 * 1024 ** 3)); then
+    _cfg_rule warn "The /home partition is only $((size / 1024 ** 3)) GiB."
+  fi
+}
+
 cfg_check_rules() {
   local k msg size u admins=0 failed=0
   local -a users=() locales=()
@@ -474,7 +523,9 @@ cfg_check_rules() {
   if [[ ${CFG[encryption]:-} == luks2 && ${CFG[bootloader]:-} == grub ]]; then
     _cfg_rule error "LUKS encryption needs systemd-boot or Limine in this version, so the kernel and initramfs sit on the unencrypted ESP."
   fi
-  if [[ ${CFG[desktop]:-none} != none && -n ${CFG[disk]:-} ]]; then
+  if [[ ${CFG[disk_mode]:-} == manual ]]; then
+    _cfg_manual_rules
+  elif [[ ${CFG[desktop]:-none} != none && -n ${CFG[disk]:-} ]]; then
     if ! size=$(hw_disk_size_bytes "${CFG[disk]}") || [[ ! $size =~ ^[0-9]+$ ]]; then
       _cfg_rule warn "Couldn't read the size of ${CFG[disk]}."
     elif ((size < 40 * 1024 ** 3)); then
@@ -484,6 +535,8 @@ cfg_check_rules() {
   if cfg_home_part; then
     if [[ ${CFG[filesystem]:-} == btrfs ]]; then
       _cfg_rule error "On btrfs, /home is a subvolume of its own already; a /home partition needs ext4 or xfs."
+    elif [[ ${CFG[disk_mode]:-} == manual ]]; then
+      : # _cfg_manual_rules checks the picked partitions' sizes instead of root_size
     elif [[ ${CFG[root_size]:-} =~ ^[0-9]+$ ]] && ((CFG[root_size] < $(cfg_root_min))); then
       _cfg_rule error "The root filesystem needs at least $(cfg_root_min) GiB with these answers, and root_size is ${CFG[root_size]}."
     elif [[ ${CFG[disk_mode]:-wipe} == wipe && -n ${CFG[disk]:-} ]] && size=$(hw_disk_size_bytes "${CFG[disk]}") &&

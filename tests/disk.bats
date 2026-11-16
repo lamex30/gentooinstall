@@ -742,3 +742,82 @@ mount -o noatime /dev/mapper/home $T/home" ]
   [[ $output == *"no install to resume"* ]]
   [ ! -s "$STUB_LOG" ]
 }
+
+# disk_mode=manual: partitions 5 and 6 were made in cfdisk and picked; 3 is Windows' and stays.
+manual_setup() {
+  CFG[disk_mode]=manual
+  CFG[esp_part]=/dev/disk/by-partuuid/aaaa-esp CFG[root_part]=/dev/disk/by-partuuid/bbbb-root
+  mkdir -p "$GI_HOST_ROOT/sys/class/block/gitestdisk6" "$GI_HOST_ROOT/sys/class/block/gitestdisk2"
+  echo 6 > "$GI_HOST_ROOT/sys/class/block/gitestdisk6/partition"
+  echo 2 > "$GI_HOST_ROOT/sys/class/block/gitestdisk2/partition"
+  TREE="$DISK disk "$'\n'"${DISK}3 part "$'\n'"${DISK}5 part "$'\n'"${DISK}6 part "
+  LABELS="${DISK}3 Basic\x20data\x20partition"$'\n'"${DISK}5 gentooinstall-esp"$'\n'"${DISK}6 gentooinstall-root"
+  PTTYPE=gpt
+  lsblk() { if [[ $* == *PTTYPE* ]]; then echo "$PTTYPE"; else fake_lsblk "$@"; fi; }
+  hw_part_find() {
+    case $2 in
+      */aaaa-esp) printf '%s\x1f%s\x1f\x1f%s\x1f%s\x1f\n' "${DISK}5" 1073741824 c12a7328-f81f-11d2-ba4b-00a0c93ec93b aaaa-esp ;;
+      */bbbb-root) printf '%s\x1f%s\x1fext4\x1f%s\x1f%s\x1f\n' "${DISK}6" 107374182400 0fc63daf-8483-4772-8e79-3d69d8477de4 bbbb-root ;;
+      */cccc-home) printf '%s\x1f%s\x1f\x1f%s\x1f%s\x1f\n' "${DISK}2" 53687091200 0fc63daf-8483-4772-8e79-3d69d8477de4 cccc-home ;;
+      *) return 1 ;;
+    esac
+  }
+}
+
+@test "manual: the picked partitions get the installer's names and types, then are formatted; no other partition is touched" {
+  manual_setup
+  run in_step step_disk
+  [ "$status" -eq 0 ]
+  [ "$(calls "$destructive")" = "sfdisk --part-type $BYID 5 C12A7328-F81F-11D2-BA4B-00A0C93EC93B
+sfdisk --part-label $BYID 5 gentooinstall-esp
+sfdisk --part-type $BYID 6 4F68BCE3-E8CD-4DB1-96E7-FBCAF984B709
+sfdisk --part-label $BYID 6 gentooinstall-root
+wipefs --all ${DISK}5 ${DISK}6
+mkfs.vfat -F 32 -n ESP ${DISK}5
+mkfs.ext4 -L root ${DISK}6" ]
+  run ! grep -qE "^(sfdisk|wipefs).* (${DISK}3|3)( |\$)" "$STUB_LOG"
+  [ "$(state_get disk.esp_part)" = 5 ]
+  [ "$(state_get disk.stage)" = mounted ]
+}
+
+@test "manual: a picked /home partition is named, typed and formatted too" {
+  manual_setup
+  CFG[home_part]=/dev/disk/by-partuuid/cccc-home
+  LABELS+=$'\n'"${DISK}2 gentooinstall-home"
+  run in_step _disk_partition_manual "$DISK"
+  [ "$status" -eq 0 ]
+  grep -qxF "sfdisk --part-type $BYID 2 933AC7E1-2EB4-4F13-B844-0E14E2AEF915" "$STUB_LOG"
+  grep -qxF "sfdisk --part-label $BYID 2 gentooinstall-home" "$STUB_LOG"
+}
+
+@test "manual: an earlier install's names on partitions not picked now are renamed old-*" {
+  manual_setup
+  LABELS="${DISK}2 gentooinstall-root"$'\n'"${DISK}5 gentooinstall-esp"$'\n'"${DISK}6 something"
+  run in_step _disk_partition_manual "$DISK"
+  [ "$status" -eq 0 ]
+  [ "$(calls sfdisk | head -n 1)" = "sfdisk --part-label $BYID 2 old-gentooinstall-root" ]
+  run ! grep -qF "sfdisk --part-label $BYID 5 old-" "$STUB_LOG"
+}
+
+@test "manual: no GPT, a vanished or repeated pick, or Windows' ESP stop before anything is written" {
+  manual_setup
+  PTTYPE=dos
+  run in_step step_disk
+  [ "$status" -ne 0 ]
+  [[ $output == *"has no GPT partition table"* ]]
+  PTTYPE=gpt
+  CFG[root_part]=/dev/disk/by-partuuid/gone
+  run in_step step_disk
+  [ "$status" -ne 0 ]
+  [[ $output == *"isn't on $DISK any more"* ]]
+  CFG[root_part]=${CFG[esp_part]}
+  run in_step step_disk
+  [ "$status" -ne 0 ]
+  [[ $output == *"three different partitions"* ]]
+  CFG[root_part]=/dev/disk/by-partuuid/bbbb-root
+  mount() { command mount "$@" && mkdir -p "${!#}/EFI/Microsoft/Boot" && touch "${!#}/EFI/Microsoft/Boot/bootmgfw.efi"; }
+  run in_step step_disk
+  [ "$status" -ne 0 ]
+  [[ $output == *"is Windows' EFI partition"* ]]
+  [ -z "$(calls "$destructive")" ]
+}

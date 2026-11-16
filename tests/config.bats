@@ -562,3 +562,47 @@ ok_config() {
   cfg_set toe no
   [ "${CFG[toe]}" = no ]
 }
+
+@test "manual partitions: validation, /home from home_part, and the rules for picks and sizes" {
+  cfg_defaults_apply
+  CFG[users]=larry CFG[disk]=/dev/disk/by-id/nvme-Test
+  run cfg_validate disk_mode manual
+  [ "$status" -eq 0 ]
+  run cfg_validate root_part '/dev/disk/by-partuuid/abcd-1234'
+  [ "$status" -eq 0 ]
+  run cfg_validate root_part 'nvme0n1p2'
+  [ "$status" -eq 1 ]
+  run cfg_validate root_part '/dev/../etc/passwd'
+  [ "$status" -eq 1 ]
+  run cfg_validate root_part '/dev/x;reboot'
+  [ "$status" -eq 1 ]
+  CFG[disk_mode]=manual CFG[home]=partition
+  ! cfg_home_part
+  CFG[home_part]=/dev/disk/by-partuuid/home
+  cfg_home_part
+  CFG[home_part]=''
+  hw_part_find() {
+    case $2 in
+      */esp) printf 'n1\x1f%s\n' "$ESP_SIZE" ;;
+      */root) printf 'n2\x1f%s\n' "$ROOT_SIZE" ;;
+      *) return 1 ;;
+    esac
+  }
+  ESP_SIZE=$((1024 ** 3)) ROOT_SIZE=$((100 * 1024 ** 3))
+  run cfg_check_rules
+  [[ $output == *"esp_part: pick an EFI system partition"* ]]
+  [[ $output == *"root_part: pick the partition Gentoo goes on"* ]]
+  CFG[esp_part]=/dev/disk/by-partuuid/esp CFG[root_part]=/dev/disk/by-partuuid/esp
+  run cfg_check_rules
+  [[ $output == *"three different partitions"* ]]
+  CFG[root_part]=/dev/disk/by-partuuid/root CFG[desktop]=plasma ROOT_SIZE=$((30 * 1024 ** 3))
+  run cfg_check_rules
+  [[ $output == *"The root partition is 30 GiB, and these answers need at least 40 GiB on it."* ]]
+  ROOT_SIZE=$((100 * 1024 ** 3)) ESP_SIZE=$((260 * 1024 ** 2))
+  run cfg_check_rules
+  [[ $output == *"The EFI partition is 260 MiB; make it at least 512 MiB"* ]]
+  CFG[bootloader]=grub
+  run cfg_check_rules
+  [[ $output != *"EFI partition is"* ]]
+  [[ $output != *"root_size"* && $output != *"A desktop needs a disk"* ]]
+}
