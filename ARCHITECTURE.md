@@ -285,7 +285,7 @@ Who writes which Portage file, so no two hooks fight over one file or variable. 
 | `package.accept_keywords/limine` (`sys-boot/limine ~amd64`) | F `step_kernel_portage` | Limine; removed otherwise |
 | `env/sys-boot/limine` (`post_pkg_postinst` copies a new `/usr/share/limine/BOOTX64.EFI` over `/efi/EFI/limine/BOOTX64.EFI`, and over the fallback while it matches that copy) | F `step_kernel_portage` | Limine; removed otherwise |
 | `env/sys-kernel/gentoo-kernel-bin`, `env/sys-kernel/gentoo-kernel` (`post_pkg_postrm`: each boot menu kernel whose `/usr/src/linux-<version>` and `/lib/modules/<version>/build` are gone and whose `/lib/modules/<version>` is still there, except the running and the newest kernel, leaves the menu, then its `/lib/modules/<version>` is deleted; through `kernel-install remove` for the ESP's entries, or with `/boot/grub/grub.cfg` by removing its files in `/boot` and one `grub-mkconfig`; nothing when the running kernel has no `/lib/modules/<version>` (a live system's chroot); `step_kernel` deletes a `grub.cfg` left from an earlier bootloader answer) | F `step_kernel_portage` | always |
-| `package.use/network` (`wpa_supplicant dbus`) | G `step_network_portage` | NetworkManager without a desktop |
+| `package.use/network` (`wpa_supplicant tkip`, plus `dbus`) | G `step_network_portage` | Always; `dbus` for NetworkManager without a desktop |
 | `package.use/zram-generator` (`-man`) | G `step_tools_portage` | zram on systemd without binary packages |
 | `package.use/plasma-meta` (`-display-manager`) | H `step_desktop_portage` | Plasma without a display manager |
 | `package.use/ngtcp2` (`gnutls`) | H `step_desktop_portage` | GNOME on systemd without binary packages |

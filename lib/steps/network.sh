@@ -6,18 +6,20 @@ step_define network "Networking" \
   "https://wiki.gentoo.org/wiki/Handbook:AMD64/Installation/System#Network"
 
 step_network_portage() {
-  local f=/etc/portage/package.use/network
+  local flags=tkip
   # The plasma and gnome profiles already set networkmanager, and every desktop profile sets
   # dbus, which wpa_supplicant needs for NetworkManager.
   if [[ ${CFG[network]} == networkmanager && ${CFG[desktop]} != plasma && ${CFG[desktop]} != gnome ]]; then
     make_conf_use_add networkmanager
   fi
   if [[ ${CFG[network]} == networkmanager && ${CFG[desktop]} == none ]]; then
-    portage_file package.use network <<< 'net-wireless/wpa_supplicant dbus'
-  elif [[ -e $GI_TARGET$f ]]; then
-    # The preview step reruns the hooks after the answers change.
-    run_cmd rm -f -- "$GI_TARGET$f"
+    flags="dbus $flags"
   fi
+  # wpa_supplicant is always installed, and Gentoo builds it without TKIP. Routers in mixed
+  # WPA/WPA2 mode, common from ISPs, use TKIP as the group cipher, so without it the network is
+  # rejected ("mismatch with WPA/WPA2") and never shows up, though the live ISO joins it fine.
+  # The preview step reruns the hooks after the answers change, and this file is rewritten.
+  portage_file package.use network <<< "net-wireless/wpa_supplicant $flags"
 }
 
 step_network_packages() {

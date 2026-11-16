@@ -23,18 +23,18 @@ chroot_cmds() {
 
 conn() { printf '%s' "$GI_TARGET/etc/NetworkManager/system-connections/$1.nmconnection"; }
 
-@test "portage hook: NetworkManager on a console profile adds the USE flag and wpa_supplicant dbus" {
+@test "portage hook: NetworkManager on a console profile adds the USE flag and wpa_supplicant dbus and tkip" {
   step step_network_portage
   step step_network_portage
   [ "$(grep '^USE=' "$GI_TARGET/etc/portage/make.conf")" = 'USE="networkmanager"' ]
-  [ "$(cat "$GI_TARGET/etc/portage/package.use/network")" = 'net-wireless/wpa_supplicant dbus' ]
+  [ "$(cat "$GI_TARGET/etc/portage/package.use/network")" = 'net-wireless/wpa_supplicant dbus tkip' ]
 }
 
-@test "portage hook: desktop profiles already set both, so nothing is written" {
+@test "portage hook: desktop profiles already set networkmanager and dbus, so only tkip is written" {
   CFG[desktop]=plasma
   step step_network_portage
   [ ! -e "$GI_TARGET/etc/portage/make.conf" ]
-  [ ! -e "$GI_TARGET/etc/portage/package.use/network" ]
+  [ "$(cat "$GI_TARGET/etc/portage/package.use/network")" = 'net-wireless/wpa_supplicant tkip' ]
 }
 
 @test "portage hook: the plain desktop profile gets the USE flag, but already has dbus" {
@@ -43,7 +43,7 @@ conn() { printf '%s' "$GI_TARGET/etc/NetworkManager/system-connections/$1.nmconn
     CFG[desktop]=$d
     step step_network_portage
     [ "$(grep '^USE=' "$GI_TARGET/etc/portage/make.conf")" = 'USE="networkmanager"' ]
-    [ ! -e "$GI_TARGET/etc/portage/package.use/network" ]
+    [ "$(cat "$GI_TARGET/etc/portage/package.use/network")" = 'net-wireless/wpa_supplicant tkip' ]
   done
   rm -rf "$GI_TARGET/etc"
   CFG[network]=dhcpcd
@@ -51,14 +51,23 @@ conn() { printf '%s' "$GI_TARGET/etc/NetworkManager/system-connections/$1.nmconn
   [ ! -e "$GI_TARGET/etc/portage/make.conf" ]
 }
 
-@test "portage hook: removes its package.use file when the answers change" {
+@test "portage hook: wpa_supplicant always gets tkip, for routers in mixed WPA/WPA2 mode" {
+  for n in networkmanager dhcpcd networkd; do
+    rm -rf "$GI_TARGET/etc"
+    CFG[network]=$n
+    step step_network_portage
+    grep -qE '^net-wireless/wpa_supplicant( dbus)? tkip$' "$GI_TARGET/etc/portage/package.use/network"
+  done
+}
+
+@test "portage hook: rewrites its package.use file when the answers change" {
   step step_network_portage
   CFG[network]=dhcpcd
   step step_network_portage
-  [ ! -e "$GI_TARGET/etc/portage/package.use/network" ]
-  CFG[network]=networkmanager CFG[desktop]=gnome
+  [ "$(cat "$GI_TARGET/etc/portage/package.use/network")" = 'net-wireless/wpa_supplicant tkip' ]
+  CFG[network]=networkmanager CFG[desktop]=none
   step step_network_portage
-  [ ! -e "$GI_TARGET/etc/portage/package.use/network" ]
+  [ "$(cat "$GI_TARGET/etc/portage/package.use/network")" = 'net-wireless/wpa_supplicant dbus tkip' ]
 }
 
 @test "packages per network manager, always with iw and wpa_supplicant" {
